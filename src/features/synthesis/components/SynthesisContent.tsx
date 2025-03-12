@@ -6,12 +6,7 @@ import "react-toastify/dist/ReactToastify.css";
 
 // Import Cornerstone libraries for DICOM rendering
 import cornerstone from "cornerstone-core";
-import cornerstoneWADOImageLoader from "cornerstone-wado-image-loader";
-import dicomParser from "dicom-parser";
 
-// Configure the WADO Image Loader for Cornerstone
-cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
-cornerstoneWADOImageLoader.configure({});
 
 const ResultContent = () => {
   // State for selected files (supports folder uploads)
@@ -185,8 +180,6 @@ const ResultContent = () => {
                 ref={fileInputRef}
                 className="hidden"
                 accept="image/*,.dcm"
-                webkitdirectory="true"
-                directory="true"
                 multiple
                 onChange={handleFileChange}
               />
