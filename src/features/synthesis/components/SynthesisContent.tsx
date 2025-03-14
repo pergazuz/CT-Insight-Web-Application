@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
-import { FaCaretRight, FaImage, FaSpinner, FaPlay, FaPause } from "react-icons/fa";
+import { FaCaretRight, FaImage, FaSpinner, FaPlay, FaPause, FaCheckCircle, FaFileMedical } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import cornerstone from "cornerstone-core";
 import cornerstoneWADOImageLoader from "cornerstone-wado-image-loader";
 import dicomParser from "dicom-parser";
-
+import { motion, AnimatePresence } from "framer-motion";
 
 declare global {
   namespace React {
@@ -34,8 +34,6 @@ type DICOMFile = File & {
   sliceLocation?: number;
 };
 
-
-
 const ResultContent = () => {
   const [selectedFiles, setSelectedFiles] = useState<DICOMFile[]>([]);
   const [sortedFiles, setSortedFiles] = useState<DICOMFile[]>([]);
@@ -48,133 +46,111 @@ const ResultContent = () => {
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const navigate = useNavigate();
 
+  const processDICOMFiles = async (files: File[]) => {
+    try {
+      const processedFiles = await Promise.all(
+        files.map(async (file) => {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const byteArray = new Uint8Array(arrayBuffer);
+            const dataSet = dicomParser.parseDicom(byteArray);
+            
+            if (!dataSet.elements['x7fe00010'] || 
+                !dataSet.elements['x00280010'] || 
+                !dataSet.elements['x00280011']) {
+              return null;
+            }
 
+            const dicomFile: DICOMFile = file;
 
-// Updated DICOM processing section in processDICOMFiles function
-const processDICOMFiles = async (files: File[]) => {
-  try {
-    const processedFiles = await Promise.all(
-      files.map(async (file) => {
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const byteArray = new Uint8Array(arrayBuffer);
-          const dataSet = dicomParser.parseDicom(byteArray);
-          
-          // Check for required DICOM elements
-          if (!dataSet.elements['x7fe00010'] || 
-              !dataSet.elements['x00280010'] || 
-              !dataSet.elements['x00280011']) {
+            const imagePositionPatientStr = dataSet.string('x00200032');
+            if (imagePositionPatientStr) {
+              const parts = imagePositionPatientStr.split('\\').map(p => parseFloat(p));
+              if (parts.length === 3) {
+                dicomFile.imagePosition = parts;
+              }
+            }
+
+            const sliceLocationStr = dataSet.string('x00201041');
+            if (sliceLocationStr) {
+              dicomFile.sliceLocation = parseFloat(sliceLocationStr);
+            }
+
+            const instanceNumberStr = dataSet.string('x00200013');
+            if (instanceNumberStr) {
+              const instanceNumber = parseInt(instanceNumberStr, 10);
+              if (!isNaN(instanceNumber)) {
+                dicomFile.instanceNumber = instanceNumber;
+              }
+            }
+
+            dicomFile.rescaleSlope = 1;
+            const slopeStr = dataSet.string('x00281053');
+            if (slopeStr) {
+              const slope = parseFloat(slopeStr);
+              if (!isNaN(slope)) dicomFile.rescaleSlope = slope;
+            }
+
+            dicomFile.rescaleIntercept = 0;
+            const interceptStr = dataSet.string('x00281052');
+            if (interceptStr) {
+              const intercept = parseFloat(interceptStr);
+              if (!isNaN(intercept)) dicomFile.rescaleIntercept = intercept;
+            }
+
+            const pixelDataElement = dataSet.elements['x7fe00010'];
+            const pixelData = new Int16Array(
+              byteArray.buffer,
+              pixelDataElement.dataOffset,
+              pixelDataElement.length / 2
+            );
+
+            dicomFile.pixelData = new Float32Array(pixelData.length);
+            for (let i = 0; i < pixelData.length; i++) {
+              let huValue = pixelData[i] * dicomFile.rescaleSlope + dicomFile.rescaleIntercept;
+              dicomFile.pixelData[i] = Math.max(-1000, Math.min(huValue, 3000));
+            }
+
+            return dicomFile;
+          } catch (error) {
+            console.error("Error processing file:", file.name, error);
             return null;
           }
+        })
+      );
 
-          const dicomFile: DICOMFile = file;
+      const validFiles = processedFiles.filter(Boolean) as DICOMFile[];
+      const sorted = [...validFiles].sort((a, b) => {
+        const aPosZ = a.imagePosition?.[2];
+        const bPosZ = b.imagePosition?.[2];
+        if (aPosZ !== undefined && bPosZ !== undefined) return aPosZ - bPosZ;
+        if (aPosZ !== undefined) return -1;
+        if (bPosZ !== undefined) return 1;
 
-          // Parse ImagePositionPatient (0020,0032)
-          const imagePositionPatientStr = dataSet.string('x00200032');
-          if (imagePositionPatientStr) {
-            const parts = imagePositionPatientStr.split('\\').map(p => parseFloat(p));
-            if (parts.length === 3) {
-              dicomFile.imagePosition = parts;
-            }
-          }
+        const aSlice = a.sliceLocation ?? Infinity;
+        const bSlice = b.sliceLocation ?? Infinity;
+        if (aSlice !== Infinity && bSlice !== Infinity) return aSlice - bSlice;
+        if (aSlice !== Infinity) return -1;
+        if (bSlice !== Infinity) return 1;
 
-          // Parse SliceLocation (0020,1041)
-          const sliceLocationStr = dataSet.string('x00201041');
-          if (sliceLocationStr) {
-            dicomFile.sliceLocation = parseFloat(sliceLocationStr);
-          }
+        const aInst = a.instanceNumber ?? Infinity;
+        const bInst = b.instanceNumber ?? Infinity;
+        if (aInst !== Infinity && bInst !== Infinity) return aInst - bInst;
+        if (aInst !== Infinity) return -1;
+        if (bInst !== Infinity) return 1;
 
-          // Parse InstanceNumber (0020,0013)
-          const instanceNumberStr = dataSet.string('x00200013');
-          if (instanceNumberStr) {
-            const instanceNumber = parseInt(instanceNumberStr, 10);
-            if (!isNaN(instanceNumber)) {
-              dicomFile.instanceNumber = instanceNumber;
-            }
-          }
+        return a.name.localeCompare(b.name, undefined, { numeric: true });
+      });
 
-          // Parse Rescale parameters
-          dicomFile.rescaleSlope = 1;
-          const slopeStr = dataSet.string('x00281053');
-          if (slopeStr) {
-            const slope = parseFloat(slopeStr);
-            if (!isNaN(slope)) dicomFile.rescaleSlope = slope;
-          }
-
-          dicomFile.rescaleIntercept = 0;
-          const interceptStr = dataSet.string('x00281052');
-          if (interceptStr) {
-            const intercept = parseFloat(interceptStr);
-            if (!isNaN(intercept)) dicomFile.rescaleIntercept = intercept;
-          }
-
-          // Process pixel data with HU conversion
-          const pixelDataElement = dataSet.elements['x7fe00010'];
-          const pixelData = new Int16Array(
-            byteArray.buffer,
-            pixelDataElement.dataOffset,
-            pixelDataElement.length / 2
-          );
-
-          dicomFile.pixelData = new Float32Array(pixelData.length);
-          for (let i = 0; i < pixelData.length; i++) {
-            let huValue = pixelData[i] * dicomFile.rescaleSlope + dicomFile.rescaleIntercept;
-            dicomFile.pixelData[i] = Math.max(-1000, Math.min(huValue, 3000));
-          }
-
-          return dicomFile;
-        } catch (error) {
-          console.error("Error processing file:", file.name, error);
-          return null;
-        }
-      })
-    );
-
-    // Filter and sort with enhanced logic
-    const validFiles = processedFiles.filter(Boolean) as DICOMFile[];
-    
-    // Enhanced sorting logic with proper fallbacks
-    const sorted = [...validFiles].sort((a, b) => {
-      // Compare ImagePositionPatient z-coordinate
-      const aPosZ = a.imagePosition?.[2];
-      const bPosZ = b.imagePosition?.[2];
-      if (aPosZ !== undefined && bPosZ !== undefined) {
-        return aPosZ - bPosZ;
+      setSortedFiles(sorted);
+      if (sorted.length !== files.length) {
+        toast.warning(`${files.length - sorted.length} invalid/malformed DICOM files filtered`);
       }
-      if (aPosZ !== undefined) return -1;
-      if (bPosZ !== undefined) return 1;
-
-      // Compare SliceLocation
-      const aSlice = a.sliceLocation ?? Infinity;
-      const bSlice = b.sliceLocation ?? Infinity;
-      if (aSlice !== Infinity && bSlice !== Infinity) {
-        return aSlice - bSlice;
-      }
-      if (aSlice !== Infinity) return -1;
-      if (bSlice !== Infinity) return 1;
-
-      // Compare InstanceNumber
-      const aInst = a.instanceNumber ?? Infinity;
-      const bInst = b.instanceNumber ?? Infinity;
-      if (aInst !== Infinity && bInst !== Infinity) {
-        return aInst - bInst;
-      }
-      if (aInst !== Infinity) return -1;
-      if (bInst !== Infinity) return 1;
-
-      // Fallback to natural filename sort
-      return a.name.localeCompare(b.name, undefined, { numeric: true });
-    });
-
-    setSortedFiles(sorted);
-    if (sorted.length !== files.length) {
-      toast.warning(`${files.length - sorted.length} invalid/malformed DICOM files filtered`);
+    } catch (error) {
+      toast.error("Error processing DICOM files");
+      console.error(error);
     }
-  } catch (error) {
-    toast.error("Error processing DICOM files");
-    console.error(error);
-  }
-};
+  };
 
   useEffect(() => {
     if (selectedFiles.length > 0) {
@@ -192,10 +168,7 @@ const processDICOMFiles = async (files: File[]) => {
           await cornerstone.loadImage(`wadouri:${imageId}`).then((image) => {
             cornerstone.displayImage(dicomElementRef.current!, image);
             cornerstone.setViewport(dicomElementRef.current!, {
-              voi: {
-                windowWidth: 3000,  // Wider window for CBCT compatibility
-                windowCenter: 500,  // Adjusted center position
-              },
+              voi: { windowWidth: 3000, windowCenter: 500 },
               invert: false
             });
             cornerstone.resize(dicomElementRef.current!, true);
@@ -211,7 +184,6 @@ const processDICOMFiles = async (files: File[]) => {
     }
   }, [showPreview, currentIndex, sortedFiles]);
 
-  // Event handlers remain the same as previous version
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files).filter((file) =>
@@ -254,29 +226,98 @@ const processDICOMFiles = async (files: File[]) => {
         {/* Upload Section */}
         <div className="flex-1 bg-white rounded-xl shadow-lg p-6">
           <div className="flex flex-col items-center space-y-4">
-            <div
-              className="w-full h-64 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors"
-              onDrop={handleDrop}
-              onDragOver={e => e.preventDefault()}
-              onClick={() => fileInputRef.current?.click()}
-            >
-                      <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              accept=".dcm"
-              multiple
-              webkitdirectory=""
-              directory=""
-              onChange={handleFileChange}
-            />
-              <FaImage className="text-gray-400 text-4xl mb-2" />
-              <p className="text-gray-600 text-center">
-                {sortedFiles.length > 0
-                  ? `${sortedFiles.length} DICOM files loaded`
-                  : "Drag DICOM folder here or click to browse"}
-              </p>
-            </div>
+          <motion.div
+  className="w-full h-64 border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer relative group"
+  onDrop={handleDrop}
+  onDragOver={e => e.preventDefault()}
+  onClick={() => fileInputRef.current?.click()}
+  initial={false}
+  animate={{
+    borderColor: sortedFiles.length > 0 ? '#10B981' : '#CBD5E1',
+    backgroundColor: sortedFiles.length > 0 ? '#ECFDF5' : '#FFFFFF'
+  }}
+  transition={{ duration: 0.3 }}
+>
+  <input
+    type="file"
+    ref={fileInputRef}
+    className="hidden"
+    accept=".dcm"
+    multiple
+    webkitdirectory=""
+    directory=""
+    onChange={handleFileChange}
+  />
+  
+  <motion.div
+    initial={{ scale: 0.8, opacity: 0 }}
+    animate={{ scale: 1, opacity: 1 }}
+    transition={{ type: 'spring', stiffness: 100 }}
+  >
+    {sortedFiles.length > 0 ? (
+      <div className="flex flex-col items-center">
+        <FaCheckCircle className="text-green-500 text-4xl mb-2" />
+        <p className="text-green-600 font-medium text-center">
+          {sortedFiles.length} DICOM files loaded!
+        </p>
+      </div>
+    ) : (
+      <div className="flex flex-col items-center">
+        <FaImage className="text-gray-400 text-4xl mb-2 group-hover:text-blue-500 transition-colors" />
+        <p className="text-gray-600 text-center group-hover:text-blue-600 transition-colors">
+          Drag DICOM folder here or click to browse
+        </p>
+      </div>
+    )}
+  </motion.div>
+
+              {sortedFiles.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="absolute bottom-4 w-full px-4"
+                >
+                  <div className="bg-green-50 p-2 rounded-lg flex items-center space-x-2">
+                    <FaCheckCircle className="text-green-500 flex-shrink-0" />
+                    <div className="flex-1 overflow-hidden">
+                      <p className="text-sm text-green-800 truncate">
+                        Folder contains {sortedFiles.length} DICOM files
+                      </p>
+                      <div className="h-1 bg-green-200 rounded-full mt-1">
+                        <div
+                          className="h-full bg-green-500 rounded-full transition-all duration-500"
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </motion.div>
+
+            {sortedFiles.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="w-full space-y-2"
+              >
+                <h4 className="text-sm font-medium text-gray-600">Uploaded Files:</h4>
+                <div className="border rounded-lg p-2 max-h-40 overflow-y-auto">
+                  {sortedFiles.map((file, index) => (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded"
+                    >
+                      <FaFileMedical className="text-blue-500 flex-shrink-0" />
+                      <span className="text-sm text-gray-600 truncate">{file.name}</span>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
 
             <div className="flex flex-col items-center space-y-4 w-full mt-4">
               <button
@@ -314,54 +355,75 @@ const processDICOMFiles = async (files: File[]) => {
         </div>
 
         {/* Preview Section */}
-        {showPreview && sortedFiles.length > 0 && (
-          <div className="flex-1 bg-white rounded-xl shadow-lg p-6">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-semibold">DICOM Preview</h3>
-                <div className="flex items-center space-x-4">
-                  <button
-                    onClick={handlePlayPause}
-                    className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        <AnimatePresence>
+          {showPreview && sortedFiles.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, x: 50 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 50 }}
+              className="flex-1 bg-white rounded-xl shadow-lg p-6"
+            >
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <motion.h3 
+                    className="text-xl font-semibold"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.2 }}
                   >
-                    {isPlaying ? <FaPause /> : <FaPlay />}
-                  </button>
-                  <span className="text-gray-600">
-                    {currentIndex + 1} / {sortedFiles.length}
-                  </span>
+                    DICOM Preview
+                  </motion.h3>
+                  <div className="flex items-center space-x-4">
+                    <button
+                      onClick={handlePlayPause}
+                      className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    >
+                      {isPlaying ? <FaPause /> : <FaPlay />}
+                    </button>
+                    <span className="text-gray-600">
+                      {currentIndex + 1} / {sortedFiles.length}
+                    </span>
+                  </div>
+                </div>
+
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="w-full h-96 bg-black rounded-lg overflow-hidden"
+                >
+                  <div ref={dicomElementRef} className="w-full h-full" />
+                </motion.div>
+
+                <div className="grid grid-cols-4 gap-2 max-h-96 overflow-y-auto">
+                  {sortedFiles.map((file, index) => (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ duration: 0.2 }}
+                      onClick={() => setCurrentIndex(index)}
+                      className={`p-2 border rounded cursor-pointer transition-colors ${
+                        index === currentIndex
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-blue-300"
+                      }`}
+                    >
+                      <div className="text-sm text-gray-600 truncate">
+                        {file.name}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {file.imagePosition?.[2]?.toFixed(1) ?? 
+                        file.sliceLocation?.toFixed(1) ??
+                        `Instance: ${file.instanceNumber ?? 'N/A'}`}
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
               </div>
-
-              <div
-                ref={dicomElementRef}
-                className="w-full h-96 bg-black rounded-lg overflow-hidden"
-              />
-
-              <div className="grid grid-cols-4 gap-2 max-h-96 overflow-y-auto">
-                {sortedFiles.map((file, index) => (
-                  <div
-                    key={index}
-                    onClick={() => setCurrentIndex(index)}
-                    className={`p-2 border rounded cursor-pointer ${
-                      index === currentIndex
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-blue-300"
-                    }`}
-                  >
-                    <div className="text-sm text-gray-600 truncate">
-                      {file.name}
-                    </div>
-                    <div className="text-xs text-gray-400">
-                      {file.imagePosition?.[2]?.toFixed(1) ?? 
-                       file.sliceLocation?.toFixed(1) ??
-                       `Instance: ${file.instanceNumber ?? 'N/A'}`}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
       <ToastContainer position="bottom-right" autoClose={3000} />
     </div>
