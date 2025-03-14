@@ -7,6 +7,16 @@ import cornerstone from "cornerstone-core";
 import cornerstoneWADOImageLoader from "cornerstone-wado-image-loader";
 import dicomParser from "dicom-parser";
 
+
+declare global {
+  namespace React {
+    interface InputHTMLAttributes<T> {
+      webkitdirectory?: string;
+      directory?: string;
+    }
+  }
+}
+
 // Configure DICOM dependencies
 cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
 cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
@@ -23,6 +33,8 @@ type DICOMFile = File & {
   imagePosition?: number[];
   sliceLocation?: number;
 };
+
+
 
 const ResultContent = () => {
   const [selectedFiles, setSelectedFiles] = useState<DICOMFile[]>([]);
@@ -248,16 +260,16 @@ const processDICOMFiles = async (files: File[]) => {
               onDragOver={e => e.preventDefault()}
               onClick={() => fileInputRef.current?.click()}
             >
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                accept=".dcm"
-                multiple
-                webkitdirectory=""
-                directory=""
-                onChange={handleFileChange}
-              />
+                      <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".dcm"
+              multiple
+              webkitdirectory=""
+              directory=""
+              onChange={handleFileChange}
+            />
               <FaImage className="text-gray-400 text-4xl mb-2" />
               <p className="text-gray-600 text-center">
                 {sortedFiles.length > 0
