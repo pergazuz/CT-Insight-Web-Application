@@ -222,54 +222,54 @@ const ResultContent = () => {
 
   return (
     <div className="flex flex-col items-center min-h-screen p-8">
-      <div className="flex flex-col lg:flex-row w-full max-w-7xl gap-8">
+      <div className="flex flex-col lg:flex-row w-full max-w-7xl gap-8 h-[35em]">
         {/* Upload Section */}
-        <div className="flex-1 bg-white rounded-xl shadow-lg p-6">
-          <div className="flex flex-col items-center space-y-4">
-          <motion.div
-  className="w-full h-64 border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer relative group"
-  onDrop={handleDrop}
-  onDragOver={e => e.preventDefault()}
-  onClick={() => fileInputRef.current?.click()}
-  initial={false}
-  animate={{
-    borderColor: sortedFiles.length > 0 ? '#10B981' : '#CBD5E1',
-    backgroundColor: sortedFiles.length > 0 ? '#ECFDF5' : '#FFFFFF'
-  }}
-  transition={{ duration: 0.3 }}
->
-  <input
-    type="file"
-    ref={fileInputRef}
-    className="hidden"
-    accept=".dcm"
-    multiple
-    webkitdirectory=""
-    directory=""
-    onChange={handleFileChange}
-  />
-  
-  <motion.div
-    initial={{ scale: 0.8, opacity: 0 }}
-    animate={{ scale: 1, opacity: 1 }}
-    transition={{ type: 'spring', stiffness: 100 }}
-  >
-    {sortedFiles.length > 0 ? (
-      <div className="flex flex-col items-center">
-        <FaCheckCircle className="text-green-500 text-4xl mb-2" />
-        <p className="text-green-600 font-medium text-center">
-          {sortedFiles.length} DICOM files loaded!
-        </p>
-      </div>
-    ) : (
-      <div className="flex flex-col items-center">
-        <FaImage className="text-gray-400 text-4xl mb-2 group-hover:text-blue-500 transition-colors" />
-        <p className="text-gray-600 text-center group-hover:text-blue-600 transition-colors">
-          Drag DICOM folder here or click to browse
-        </p>
-      </div>
-    )}
-  </motion.div>
+        <div className="flex-1 bg-white rounded-xl shadow-lg p-6 flex flex-col">
+          <div className="flex flex-col items-center space-y-4 h-full">
+            <motion.div
+              className="w-full h-full border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer relative group"
+              onDrop={handleDrop}
+              onDragOver={e => e.preventDefault()}
+              onClick={() => fileInputRef.current?.click()}
+              initial={false}
+              animate={{
+                borderColor: sortedFiles.length > 0 ? '#10B981' : '#CBD5E1',
+                backgroundColor: sortedFiles.length > 0 ? '#ECFDF5' : '#FFFFFF'
+              }}
+              transition={{ duration: 0.3 }}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept=".dcm"
+                multiple
+                webkitdirectory=""
+                directory=""
+                onChange={handleFileChange}
+              />
+              
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 100 }}
+              >
+                {sortedFiles.length > 0 ? (
+                  <div className="flex flex-col items-center">
+                    <FaCheckCircle className="text-green-500 text-4xl mb-2" />
+                    <p className="text-green-600 font-medium text-center">
+                      {sortedFiles.length} DICOM files loaded!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center">
+                    <FaImage className="text-gray-400 text-4xl mb-2 group-hover:text-blue-500 transition-colors duration-300" />
+                    <p className="text-gray-600 text-center group-hover:text-blue-600 transition-colors duration-300">
+                      Drag DICOM folder here or click to browse
+                    </p>
+                  </div>
+                )}
+              </motion.div>
 
               {sortedFiles.length > 0 && (
                 <motion.div
@@ -299,10 +299,10 @@ const ResultContent = () => {
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
-                className="w-full space-y-2"
+                className="w-full space-y-2 flex-1"
               >
                 <h4 className="text-sm font-medium text-gray-600">Uploaded Files:</h4>
-                <div className="border rounded-lg p-2 max-h-40 overflow-y-auto">
+                <div className="border rounded-lg p-2 h-40 overflow-y-auto">
                   {sortedFiles.map((file, index) => (
                     <motion.div
                       key={index}
@@ -329,7 +329,7 @@ const ResultContent = () => {
                   setIsLoading(true);
                   setTimeout(() => navigate("/result"), 2000);
                 }}
-                className="w-full max-w-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center"
+                className="w-full max-w-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors duration-300 flex items-center justify-center"
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -345,7 +345,7 @@ const ResultContent = () => {
               {sortedFiles.length > 0 && (
                 <button
                   onClick={() => setShowPreview(!showPreview)}
-                  className="text-blue-600 hover:text-blue-700 font-medium"
+                  className="text-blue-600 hover:text-blue-700 font-medium transition-colors duration-300"
                 >
                   {showPreview ? "Hide Preview" : "Show Preview"}
                 </button>
@@ -361,9 +361,9 @@ const ResultContent = () => {
               initial={{ opacity: 0, x: 50 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 50 }}
-              className="flex-1 bg-white rounded-xl shadow-lg p-6"
+              className="flex-1 bg-white rounded-xl shadow-lg p-6 flex flex-col h-full"
             >
-              <div className="space-y-4">
+              <div className="space-y-4 h-full flex flex-col">
                 <div className="flex items-center justify-between">
                   <motion.h3 
                     className="text-xl font-semibold"
@@ -376,7 +376,7 @@ const ResultContent = () => {
                   <div className="flex items-center space-x-4">
                     <button
                       onClick={handlePlayPause}
-                      className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                      className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors duration-300"
                     >
                       {isPlaying ? <FaPause /> : <FaPlay />}
                     </button>
@@ -389,12 +389,12 @@ const ResultContent = () => {
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="w-full h-96 bg-black rounded-lg overflow-hidden"
+                  className="w-full flex-1 bg-black rounded-lg overflow-hidden"
                 >
                   <div ref={dicomElementRef} className="w-full h-full" />
                 </motion.div>
 
-                <div className="grid grid-cols-4 gap-2 max-h-96 overflow-y-auto">
+                <div className="grid grid-cols-4 gap-2 h-32 overflow-y-auto">
                   {sortedFiles.map((file, index) => (
                     <motion.div
                       key={index}
@@ -403,7 +403,7 @@ const ResultContent = () => {
                       exit={{ opacity: 0, scale: 0.9 }}
                       transition={{ duration: 0.2 }}
                       onClick={() => setCurrentIndex(index)}
-                      className={`p-2 border rounded cursor-pointer transition-colors ${
+                      className={`p-2 border rounded cursor-pointer transition-colors duration-300 ${
                         index === currentIndex
                           ? "border-blue-500 bg-blue-50"
                           : "border-gray-200 hover:border-blue-300"
