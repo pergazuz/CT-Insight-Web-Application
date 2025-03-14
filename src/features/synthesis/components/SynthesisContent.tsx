@@ -1,291 +1,357 @@
 import React, { useState, useEffect, useRef } from "react";
-import { FaCaretRight, FaImage, FaSpinner } from "react-icons/fa";
+import { FaCaretRight, FaImage, FaSpinner, FaPlay, FaPause } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-
-// Import Cornerstone libraries for DICOM rendering
 import cornerstone from "cornerstone-core";
+import cornerstoneWADOImageLoader from "cornerstone-wado-image-loader";
+import dicomParser from "dicom-parser";
 
+// Configure DICOM dependencies
+cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
+cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+cornerstoneWADOImageLoader.configure({
+  useWebWorkers: true,
+  webWorkerPath: "/dicomweb-worker.js",
+});
+
+type DICOMFile = File & {
+  instanceNumber?: number;
+  rescaleSlope?: number;
+  rescaleIntercept?: number;
+  pixelData?: Float32Array;
+  imagePosition?: number[];
+  sliceLocation?: number;
+};
 
 const ResultContent = () => {
-  // State for selected files (supports folder uploads)
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  // Array of object URLs for previewing the files
-  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-  // Current index for the slider preview
+  const [selectedFiles, setSelectedFiles] = useState<DICOMFile[]>([]);
+  const [sortedFiles, setSortedFiles] = useState<DICOMFile[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  // State for tracking drag events
-  const [isDragging, setIsDragging] = useState(false);
-  // State for processing/loading animation
+  const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  // State to toggle the preview view
   const [showPreview, setShowPreview] = useState(false);
-  // Ref for the hidden file input
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Ref for the DICOM rendering element (Cornerstone requires a DOM element)
   const dicomElementRef = useRef<HTMLDivElement>(null);
-  // React Router's navigation hook
+  const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const navigate = useNavigate();
 
-  /**
-   * Generate object URLs for each uploaded file.
-   * Reset slider index and clean up URLs when files change.
-   */
+
+
+// Updated DICOM processing section in processDICOMFiles function
+const processDICOMFiles = async (files: File[]) => {
+  try {
+    const processedFiles = await Promise.all(
+      files.map(async (file) => {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const byteArray = new Uint8Array(arrayBuffer);
+          const dataSet = dicomParser.parseDicom(byteArray);
+          
+          // Check for required DICOM elements
+          if (!dataSet.elements['x7fe00010'] || 
+              !dataSet.elements['x00280010'] || 
+              !dataSet.elements['x00280011']) {
+            return null;
+          }
+
+          const dicomFile: DICOMFile = file;
+
+          // Parse ImagePositionPatient (0020,0032)
+          const imagePositionPatientStr = dataSet.string('x00200032');
+          if (imagePositionPatientStr) {
+            const parts = imagePositionPatientStr.split('\\').map(p => parseFloat(p));
+            if (parts.length === 3) {
+              dicomFile.imagePosition = parts;
+            }
+          }
+
+          // Parse SliceLocation (0020,1041)
+          const sliceLocationStr = dataSet.string('x00201041');
+          if (sliceLocationStr) {
+            dicomFile.sliceLocation = parseFloat(sliceLocationStr);
+          }
+
+          // Parse InstanceNumber (0020,0013)
+          const instanceNumberStr = dataSet.string('x00200013');
+          if (instanceNumberStr) {
+            const instanceNumber = parseInt(instanceNumberStr, 10);
+            if (!isNaN(instanceNumber)) {
+              dicomFile.instanceNumber = instanceNumber;
+            }
+          }
+
+          // Parse Rescale parameters
+          dicomFile.rescaleSlope = 1;
+          const slopeStr = dataSet.string('x00281053');
+          if (slopeStr) {
+            const slope = parseFloat(slopeStr);
+            if (!isNaN(slope)) dicomFile.rescaleSlope = slope;
+          }
+
+          dicomFile.rescaleIntercept = 0;
+          const interceptStr = dataSet.string('x00281052');
+          if (interceptStr) {
+            const intercept = parseFloat(interceptStr);
+            if (!isNaN(intercept)) dicomFile.rescaleIntercept = intercept;
+          }
+
+          // Process pixel data with HU conversion
+          const pixelDataElement = dataSet.elements['x7fe00010'];
+          const pixelData = new Int16Array(
+            byteArray.buffer,
+            pixelDataElement.dataOffset,
+            pixelDataElement.length / 2
+          );
+
+          dicomFile.pixelData = new Float32Array(pixelData.length);
+          for (let i = 0; i < pixelData.length; i++) {
+            let huValue = pixelData[i] * dicomFile.rescaleSlope + dicomFile.rescaleIntercept;
+            dicomFile.pixelData[i] = Math.max(-1000, Math.min(huValue, 3000));
+          }
+
+          return dicomFile;
+        } catch (error) {
+          console.error("Error processing file:", file.name, error);
+          return null;
+        }
+      })
+    );
+
+    // Filter and sort with enhanced logic
+    const validFiles = processedFiles.filter(Boolean) as DICOMFile[];
+    
+    // Enhanced sorting logic with proper fallbacks
+    const sorted = [...validFiles].sort((a, b) => {
+      // Compare ImagePositionPatient z-coordinate
+      const aPosZ = a.imagePosition?.[2];
+      const bPosZ = b.imagePosition?.[2];
+      if (aPosZ !== undefined && bPosZ !== undefined) {
+        return aPosZ - bPosZ;
+      }
+      if (aPosZ !== undefined) return -1;
+      if (bPosZ !== undefined) return 1;
+
+      // Compare SliceLocation
+      const aSlice = a.sliceLocation ?? Infinity;
+      const bSlice = b.sliceLocation ?? Infinity;
+      if (aSlice !== Infinity && bSlice !== Infinity) {
+        return aSlice - bSlice;
+      }
+      if (aSlice !== Infinity) return -1;
+      if (bSlice !== Infinity) return 1;
+
+      // Compare InstanceNumber
+      const aInst = a.instanceNumber ?? Infinity;
+      const bInst = b.instanceNumber ?? Infinity;
+      if (aInst !== Infinity && bInst !== Infinity) {
+        return aInst - bInst;
+      }
+      if (aInst !== Infinity) return -1;
+      if (bInst !== Infinity) return 1;
+
+      // Fallback to natural filename sort
+      return a.name.localeCompare(b.name, undefined, { numeric: true });
+    });
+
+    setSortedFiles(sorted);
+    if (sorted.length !== files.length) {
+      toast.warning(`${files.length - sorted.length} invalid/malformed DICOM files filtered`);
+    }
+  } catch (error) {
+    toast.error("Error processing DICOM files");
+    console.error(error);
+  }
+};
+
   useEffect(() => {
     if (selectedFiles.length > 0) {
-      const urls = selectedFiles.map((file) => URL.createObjectURL(file));
-      setPreviewUrls(urls);
-      setCurrentIndex(0);
-      return () => urls.forEach((url) => URL.revokeObjectURL(url));
-    } else {
-      setPreviewUrls([]);
+      processDICOMFiles(selectedFiles);
     }
   }, [selectedFiles]);
 
-  /**
-   * When a DICOM file is to be previewed, load and render it using Cornerstone.
-   */
   useEffect(() => {
-    if (
-      showPreview &&
-      selectedFiles.length > 0 &&
-      selectedFiles[currentIndex].name.toLowerCase().endsWith(".dcm") &&
-      dicomElementRef.current
-    ) {
-      const imageId = "wadouri:" + previewUrls[currentIndex];
-      // Enable the element for Cornerstone rendering
-      cornerstone.enable(dicomElementRef.current);
-      // Load the DICOM image and display it
-      cornerstone
-        .loadImage(imageId)
-        .then((image) => {
-          if (dicomElementRef.current) {
-            cornerstone.displayImage(dicomElementRef.current, image);
-          }
-        })
-        .catch((err) => {
-          console.error(err);
+    if (showPreview && sortedFiles.length > 0 && dicomElementRef.current) {
+      const loadImage = async () => {
+        try {
+          const file = sortedFiles[currentIndex];
+          const imageId = URL.createObjectURL(file);
+          
+          await cornerstone.loadImage(`wadouri:${imageId}`).then((image) => {
+            cornerstone.displayImage(dicomElementRef.current!, image);
+            cornerstone.setViewport(dicomElementRef.current!, {
+              voi: {
+                windowWidth: 3000,  // Wider window for CBCT compatibility
+                windowCenter: 500,  // Adjusted center position
+              },
+              invert: false
+            });
+            cornerstone.resize(dicomElementRef.current!, true);
+          });
+        } catch (err) {
+          console.error("Error loading DICOM image:", err);
           toast.error("Failed to load DICOM image");
-        });
-    }
-  }, [showPreview, currentIndex, selectedFiles, previewUrls]);
+        }
+      };
 
-  /**
-   * Handle file drop events by converting FileList into an array.
-   */
+      cornerstone.enable(dicomElementRef.current);
+      loadImage();
+    }
+  }, [showPreview, currentIndex, sortedFiles]);
+
+  // Event handlers remain the same as previous version
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    setIsDragging(false);
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      setSelectedFiles(Array.from(files));
+    const files = Array.from(e.dataTransfer.files).filter((file) =>
+      file.name.toLowerCase().endsWith(".dcm")
+    );
+    if (files.length > 0) {
+      setSelectedFiles(files as DICOMFile[]);
+    } else {
+      toast.error("No DICOM files found in dragged content");
     }
   };
 
-  /**
-   * Allow dropping by preventing default behavior and updating drag state.
-   */
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  /**
-   * Reset the drag state when leaving the drop zone.
-   */
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(false);
-  };
-
-  /**
-   * Handle changes from the file input (supports folder uploads).
-   */
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setSelectedFiles(Array.from(e.target.files));
+      const files = Array.from(e.target.files).filter((file) =>
+        file.name.toLowerCase().endsWith(".dcm")
+      ) as DICOMFile[];
+      if (files.length > 0) {
+        setSelectedFiles(files);
+      } else {
+        toast.error("No DICOM files selected");
+      }
     }
   };
 
-  /**
-   * Trigger the file input when the drop zone is clicked.
-   */
-  const handleZoneClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  /**
-   * Process the files when the arrow button is clicked.
-   */
-  const handleArrowClick = () => {
-    if (selectedFiles.length === 0) {
-      toast.error("Please upload DICOM files!");
-      return;
+  const handlePlayPause = () => {
+    if (!isPlaying) {
+      playIntervalRef.current = setInterval(() => {
+        setCurrentIndex(prev => (prev + 1) % sortedFiles.length);
+      }, 150);
+    } else {
+      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
     }
-    setIsLoading(true);
-    // Simulate a delay before navigation
-    setTimeout(() => {
-      navigate("/result");
-    }, 2000);
-  };
-
-  /**
-   * Toggle the preview view.
-   */
-  const handlePreviewToggle = () => {
-    setShowPreview((prev) => !prev);
-  };
-
-  /**
-   * Navigate to the next image in the slider.
-   */
-  const handleNext = () => {
-    if (previewUrls.length > 0) {
-      setCurrentIndex((prevIndex) => (prevIndex + 1) % previewUrls.length);
-    }
-  };
-
-  /**
-   * Navigate to the previous image in the slider.
-   */
-  const handlePrev = () => {
-    if (previewUrls.length > 0) {
-      setCurrentIndex(
-        (prevIndex) => (prevIndex - 1 + previewUrls.length) % previewUrls.length
-      );
-    }
+    setIsPlaying(!isPlaying);
   };
 
   return (
-    <div className="flex flex-col items-center min-h-screen">
-      {/* Main container for upload and processing sections */}
-      <div className="flex w-3/4 max-w-4xl gap-4 mt-8">
-        {/* Left side: Upload/Preview section */}
-        <div className="flex-1 bg-white shadow-xl rounded-lg p-6">
-          <div className="flex flex-col items-center justify-center">
-            {/* Drop zone */}
+    <div className="flex flex-col items-center min-h-screen p-8">
+      <div className="flex flex-col lg:flex-row w-full max-w-7xl gap-8">
+        {/* Upload Section */}
+        <div className="flex-1 bg-white rounded-xl shadow-lg p-6">
+          <div className="flex flex-col items-center space-y-4">
             <div
-              className={`w-full h-96 flex items-center justify-center border-2 border-dashed rounded-lg p-4 transition-colors cursor-pointer ${
-                isDragging ? "border-blue-400" : "border-gray-300"
-              }`}
+              className="w-full h-64 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors"
               onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onClick={handleZoneClick}
+              onDragOver={e => e.preventDefault()}
+              onClick={() => fileInputRef.current?.click()}
             >
-              {/* Hidden file input supporting folder selection */}
               <input
                 type="file"
                 ref={fileInputRef}
                 className="hidden"
-                accept="image/*,.dcm"
+                accept=".dcm"
                 multiple
+                webkitdirectory=""
+                directory=""
                 onChange={handleFileChange}
               />
-              {/* If a single non-DICOM file is selected, show its preview */}
-              {previewUrls.length === 1 &&
-              !selectedFiles[0].name.toLowerCase().endsWith(".dcm") ? (
-                <img
-                  src={previewUrls[0]}
-                  alt="Preview"
-                  className="w-full h-full object-cover rounded"
-                />
-              ) : (
-                <FaImage className="text-gray-400 text-6xl" />
+              <FaImage className="text-gray-400 text-4xl mb-2" />
+              <p className="text-gray-600 text-center">
+                {sortedFiles.length > 0
+                  ? `${sortedFiles.length} DICOM files loaded`
+                  : "Drag DICOM folder here or click to browse"}
+              </p>
+            </div>
+
+            <div className="flex flex-col items-center space-y-4 w-full mt-4">
+              <button
+                onClick={() => {
+                  if (sortedFiles.length === 0) {
+                    toast.error("Please upload DICOM files!");
+                    return;
+                  }
+                  setIsLoading(true);
+                  setTimeout(() => navigate("/result"), 2000);
+                }}
+                className="w-full max-w-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <FaSpinner className="animate-spin h-6 w-6" />
+                ) : (
+                  <>
+                    <span>Process DICOM</span>
+                    <FaCaretRight className="ml-2" />
+                  </>
+                )}
+              </button>
+
+              {sortedFiles.length > 0 && (
+                <button
+                  onClick={() => setShowPreview(!showPreview)}
+                  className="text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  {showPreview ? "Hide Preview" : "Show Preview"}
+                </button>
               )}
             </div>
-            <h2 className="text-md font-semibold mt-4">
-              Please upload the CBCT DICOM files or folder
-            </h2>
           </div>
         </div>
 
-        {/* Right side: Processing status and actions */}
-        <div className="flex-1 flex flex-col justify-center items-center">
-          {isLoading ? (
-            <>
-              <p className="text-2xl font-medium mb-2">Processing ...</p>
-              <p className="text-gray-600 mb-4">Please wait for your CT</p>
-            </>
-          ) : selectedFiles.length > 0 ? (
-            <>
-              <p className="text-2xl font-medium mb-2">
-                {selectedFiles.length === 1
-                  ? "CT Image Uploaded"
-                  : "CT Images Uploaded"}
-              </p>
-              <p className="text-gray-600 mb-4">Ready to process your CT</p>
-            </>
-          ) : (
-            <>
-              <p className="text-2xl font-medium mb-2">Awaiting CT Image</p>
-              <p className="text-gray-600 mb-4">
-                Please upload your CT image or folder
-              </p>
-            </>
-          )}
-          <div className="flex flex-col items-center">
-            <button onClick={handleArrowClick} className="focus:outline-none">
-              {isLoading ? (
-                <FaSpinner className="text-orange-500 text-6xl animate-spin" />
-              ) : (
-                <FaCaretRight className="text-orange-500 text-6xl" />
-              )}
-            </button>
-            {selectedFiles.length > 0 && (
-              <button
-                onClick={handlePreviewToggle}
-                className="mt-4 px-4 py-2 bg-blue-500 text-white rounded focus:outline-none"
-              >
-                {showPreview ? "Hide Preview" : "Preview DICOM Files"}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+        {/* Preview Section */}
+        {showPreview && sortedFiles.length > 0 && (
+          <div className="flex-1 bg-white rounded-xl shadow-lg p-6">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-semibold">DICOM Preview</h3>
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={handlePlayPause}
+                    className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  >
+                    {isPlaying ? <FaPause /> : <FaPlay />}
+                  </button>
+                  <span className="text-gray-600">
+                    {currentIndex + 1} / {sortedFiles.length}
+                  </span>
+                </div>
+              </div>
 
-      {/* Preview section: Slider for images */}
-      {showPreview && previewUrls.length > 0 && (
-        <div className="mt-6 w-3/4 max-w-4xl bg-gray-100 p-4 rounded shadow-md">
-          <h3 className="text-lg font-semibold mb-2">DICOM Files Preview</h3>
-          <div className="relative">
-            {selectedFiles[currentIndex].name.toLowerCase().endsWith(".dcm") ? (
-              // Render a div for DICOM preview using Cornerstone
               <div
                 ref={dicomElementRef}
-                style={{ width: "100%", height: "500px" }}
-                className="dicomViewport bg-black"
-              ></div>
-            ) : (
-              // For non-DICOM images, display using an img tag
-              <img
-                src={previewUrls[currentIndex]}
-                alt={`Preview ${currentIndex + 1}`}
-                className="w-full h-auto object-cover rounded"
+                className="w-full h-96 bg-black rounded-lg overflow-hidden"
               />
-            )}
-            {/* Navigation buttons */}
-            {previewUrls.length > 1 && (
-              <>
-                <button
-                  onClick={handlePrev}
-                  className="absolute left-0 top-1/2 transform -translate-y-1/2 bg-gray-700 text-white px-2 py-1 rounded"
-                >
-                  Prev
-                </button>
-                <button
-                  onClick={handleNext}
-                  className="absolute right-0 top-1/2 transform -translate-y-1/2 bg-gray-700 text-white px-2 py-1 rounded"
-                >
-                  Next
-                </button>
-              </>
-            )}
+
+              <div className="grid grid-cols-4 gap-2 max-h-96 overflow-y-auto">
+                {sortedFiles.map((file, index) => (
+                  <div
+                    key={index}
+                    onClick={() => setCurrentIndex(index)}
+                    className={`p-2 border rounded cursor-pointer ${
+                      index === currentIndex
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-blue-300"
+                    }`}
+                  >
+                    <div className="text-sm text-gray-600 truncate">
+                      {file.name}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {file.imagePosition?.[2]?.toFixed(1) ?? 
+                       file.sliceLocation?.toFixed(1) ??
+                       `Instance: ${file.instanceNumber ?? 'N/A'}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
-      )}
-      <ToastContainer position="bottom-right" />
+        )}
+      </div>
+      <ToastContainer position="bottom-right" autoClose={3000} />
     </div>
   );
 };
