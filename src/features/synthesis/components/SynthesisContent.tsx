@@ -34,7 +34,7 @@ type DICOMFile = File & {
   sliceLocation?: number;
 };
 
-const ResultContent = () => {
+const SynthesisContent = () => {
   const [selectedFiles, setSelectedFiles] = useState<DICOMFile[]>([]);
   const [sortedFiles, setSortedFiles] = useState<DICOMFile[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -220,6 +220,42 @@ const ResultContent = () => {
     setIsPlaying(!isPlaying);
   };
 
+  const handleProcessDICOM = async () => {
+    if (sortedFiles.length === 0) {
+      toast.error("Please upload DICOM files!");
+      return;
+    }
+  
+    setIsLoading(true);
+    try {
+      const formData = new FormData();
+      
+      // Append all DICOM files to FormData
+      sortedFiles.forEach((file) => {
+        formData.append("dicomFiles", file);
+      });
+  
+      // Send to backend endpoint
+      const response = await fetch("http://127.0.0.1:8000/process-dicom", {
+        method: "POST",
+        body: formData,
+
+      });
+  
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+  
+      const result = await response.json();
+      navigate("/result", { state: { data: result } });
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast.error("Failed to process DICOM files");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col items-center min-h-screen p-8">
       <div className="flex flex-col lg:flex-row w-full max-w-7xl gap-8 h-[35em]">
@@ -321,14 +357,7 @@ const ResultContent = () => {
 
             <div className="flex flex-col items-center space-y-4 w-full mt-4">
               <button
-                onClick={() => {
-                  if (sortedFiles.length === 0) {
-                    toast.error("Please upload DICOM files!");
-                    return;
-                  }
-                  setIsLoading(true);
-                  setTimeout(() => navigate("/result"), 2000);
-                }}
+                onClick={handleProcessDICOM}
                 className="w-full max-w-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors duration-300 flex items-center justify-center"
                 disabled={isLoading}
               >
@@ -430,4 +459,4 @@ const ResultContent = () => {
   );
 };
 
-export default ResultContent;
+export default SynthesisContent;
