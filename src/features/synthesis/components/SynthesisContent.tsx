@@ -299,8 +299,8 @@ const SynthesisContent = () => {
                   </div>
                 ) : (
                   <div className="flex flex-col items-center">
-                    <FaImage className="text-gray-400 text-4xl mb-2 group-hover:text-blue-500 transition-colors duration-300" />
-                    <p className="text-gray-600 text-center group-hover:text-blue-600 transition-colors duration-300">
+                    <FaImage className="text-gray-400 text-4xl mb-2 group-hover:text-[#FD662E] transition-colors duration-300" />
+                    <p className="text-gray-600 text-center group-hover:text-[#FD662E] transition-colors duration-300">
                       Drag DICOM folder here or click to browse
                     </p>
                   </div>
@@ -347,7 +347,7 @@ const SynthesisContent = () => {
                       transition={{ delay: index * 0.05 }}
                       className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded"
                     >
-                      <FaFileMedical className="text-blue-500 flex-shrink-0" />
+                      <FaFileMedical className="text-[#FD662E] flex-shrink-0" />
                       <span className="text-sm text-gray-600 truncate">{file.name}</span>
                     </motion.div>
                   ))}
@@ -358,7 +358,7 @@ const SynthesisContent = () => {
             <div className="flex flex-col items-center space-y-4 w-full mt-4">
               <button
                 onClick={handleProcessDICOM}
-                className="w-full max-w-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors duration-300 flex items-center justify-center"
+                className="w-full max-w-xs bg-[#FD662E] hover:bg-[#FD662E] text-white font-semibold py-3 rounded-lg transition-colors duration-300 flex items-center justify-center"
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -374,7 +374,7 @@ const SynthesisContent = () => {
               {sortedFiles.length > 0 && (
                 <button
                   onClick={() => setShowPreview(!showPreview)}
-                  className="text-blue-600 hover:text-blue-700 font-medium transition-colors duration-300"
+                  className="text-[#FD662E] hover:text-[#FD662E] font-medium transition-colors duration-300"
                 >
                   {showPreview ? "Hide Preview" : "Show Preview"}
                 </button>
@@ -405,7 +405,7 @@ const SynthesisContent = () => {
                   <div className="flex items-center space-x-4">
                     <button
                       onClick={handlePlayPause}
-                      className="p-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors duration-300"
+                      className="p-2 bg-[#FD662E] text-white rounded hover:bg-[#FD662E] transition-colors duration-300"
                     >
                       {isPlaying ? <FaPause /> : <FaPlay />}
                     </button>
@@ -434,8 +434,8 @@ const SynthesisContent = () => {
                       onClick={() => setCurrentIndex(index)}
                       className={`p-2 border rounded cursor-pointer transition-colors duration-300 ${
                         index === currentIndex
-                          ? "border-blue-500 bg-blue-50"
-                          : "border-gray-200 hover:border-blue-300"
+                          ? "border-[#FD662E] bg-[#FD662E]"
+                          : "border-gray-200 hover:border-[#FD662E]"
                       }`}
                     >
                       <div className="text-sm text-gray-600 truncate">
