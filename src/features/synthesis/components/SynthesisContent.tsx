@@ -247,7 +247,7 @@ const SynthesisContent = () => {
       }
   
       const result = await response.json();
-      navigate("/result", { state: { data: result } });
+      navigate("/result", { state: { files: result.files } });
     } catch (error) {
       console.error("Upload error:", error);
       toast.error("Failed to process DICOM files");
